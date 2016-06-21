@@ -1,0 +1,468 @@
+<!DOCTYPE HTML>
+
+<html>
+
+<head>
+
+<link rel="stylesheet" type="text/css" href="css/style.css" />
+<title>Tetris</title>
+
+<meta name="viewport" content="user-scalable=no, initial-scale=0.5, maximum-scale=1, user-scalable=0" />
+
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel= 'icon' href="images/logo.png"/>
+<div id="title" align="center">
+<span class="red">T</span><span class="blue">E</span><span class="green">T</span><span class="orange">R</span><span class="purple">I</span><span class="yellow">S</span>
+</div>
+</head>
+
+<body>
+
+<div id="gameboard">
+	<canvas id="gameCanvas" width="320" height="640"></canvas>
+</div>
+
+<div id="score">
+	<p>Lines: <span id="lines"></span></p>
+</div>
+
+<script type="text/javascript" src="js/pieces.js"></script>
+<script type="text/javascript" src="js/BulkImageLoader.js"></script>
+
+<script type="text/javascript">
+var ROWS = 20;
+var COLS = 10;
+var SIZE = 32;
+
+var canvas;
+var ctx;
+var blockImg;
+var backgroundImg;
+var gameOverImg;
+var currentPiece;
+var gameData;
+var imgLoader;
+var prevTime;
+var curTime;
+var isGameOver;
+var lineSpan;
+var currentLines;
+var touchX;
+var touchY;
+var touchId;
+
+window.onload = onReady;
+
+document.body.addEventListener('touchstart', function(e)
+{
+	e.preventDefault();
+	
+	touchX = e.touches[0].pageX;
+	touchY = e.touches[0].pageY;
+	touchId = e.touches[0].identifier;
+	
+} );
+
+document.body.addEventListener('touchmove', function(e)
+{
+	e.preventDefault();
+	
+	var difY = e.touches[0].pageY - touchY;
+	
+	if(difY > 60)
+	{
+		if( checkMove(currentPiece.gridx, currentPiece.gridy + 1, currentPiece.curState) )
+			currentPiece.gridy++;
+	}
+	
+} );
+
+document.body.addEventListener('touchend', function(e) 
+{
+	e.preventDefault();
+	var touchEndX;
+	var touchEndY;
+	
+	var touch = e.changedTouches.item(0);
+	
+	try
+	{
+		touchEndX = touch.pageX;
+		touchEndY = touch.pageY;
+	}
+	catch(err)
+	{
+		alert(err);
+		return;
+	}
+	
+	var difX = Math.abs(touchEndX - touchX);
+	var difY = Math.abs(touchEndY - touchY);
+	
+	if(difX < 10 && difY < 10)
+	{
+		var newState = currentPiece.curState - 1;
+		if(newState < 0)
+			newState = currentPiece.states.length - 1;
+			
+		if( checkMove(currentPiece.gridx, currentPiece.gridy, newState) )
+			currentPiece.curState = newState;
+	}
+	else
+	if(difX > difY)
+	{
+		if(touchEndX < touchX)
+		{
+			if( checkMove(currentPiece.gridx - 1, currentPiece.gridy, currentPiece.curState) )
+				currentPiece.gridx--;
+		}	
+		else
+		{
+			if( checkMove(currentPiece.gridx + 1, currentPiece.gridy, currentPiece.curState) )
+				currentPiece.gridx++;
+		}
+	}
+	
+});
+
+function onReady()
+{
+	imgLoader = new BulkImageLoader();
+	imgLoader.addImage("blocks.png", "blocks");
+	imgLoader.addImage("bg.png", "bg");
+	imgLoader.addImage("over.png", "gameover");
+	imgLoader.onReadyCallback = onImagesLoaded;
+	imgLoader.loadImages();
+	
+	canvas = document.getElementById('gameCanvas');
+	ctx = canvas.getContext('2d');
+	lineSpan = document.getElementById('lines');
+	
+	prevTime = curTime = 0;
+	
+	document.onkeydown = getInput;
+}
+/*
+ * Move the block based on arrow keys
+ */
+function getInput(e)
+{
+	if(!e) 
+	{ 
+		var e = window.event; 
+	}
+	
+	e.preventDefault();
+	
+	if(isGameOver != true)
+	{
+		switch(e.keyCode)
+		{
+			/*Left*/
+			case 37:
+			{
+				if( checkMove(currentPiece.gridx - 1, currentPiece.gridy, currentPiece.curState) )
+					currentPiece.gridx--;
+			}
+			break;
+			/*Right*/
+			case 39:
+			{
+				if( checkMove(currentPiece.gridx + 1, currentPiece.gridy, currentPiece.curState) )
+					currentPiece.gridx++;
+			}
+			break;
+			/*Up*/
+			case 38:
+			{
+				var newState = currentPiece.curState - 1;
+				if(newState < 0)
+					newState = currentPiece.states.length - 1;
+					
+				if( checkMove(currentPiece.gridx, currentPiece.gridy, newState) )
+					currentPiece.curState = newState;
+			}
+			break;
+			/*Down*/
+			case 40:
+			{
+				if( checkMove(currentPiece.gridx, currentPiece.gridy + 1, currentPiece.curState) )
+					currentPiece.gridy++;
+			}
+			break;
+			case 32:
+			{
+				while( checkMove(currentPiece.gridx, currentPiece.gridy + 1, currentPiece.curState) )
+					currentPiece.gridy++;
+			}
+			break;
+		}
+	}
+	else
+	{
+		initGame();
+	}
+}
+
+function onImagesLoaded(e)
+{
+	blockImg = imgLoader.getImageAtIndex(0);
+	backgroundImg = imgLoader.getImageAtIndex(1);
+	gameOverImg = imgLoader.getImageAtIndex(2);
+	initGame();
+}
+
+function initGame()
+{
+	var r, c;
+	currentLines = 0;
+	isGameOver = false;
+	
+	if(gameData == undefined)
+	{
+		gameData = new Array();
+		
+		for(r = 0; r < ROWS; r++)
+		{
+			gameData[r] = new Array();
+			for(c = 0; c < COLS; c++)
+			{
+				gameData[r].push(0);
+			}
+		}		
+	}
+	else
+	{
+		for(r = 0; r < ROWS; r++)
+		{
+			for(c = 0; c < COLS; c++)
+			{
+				gameData[r][c] = 0;
+			}
+		}
+	}
+	
+	currentPiece = getRandomPiece();
+	
+	lineSpan.innerHTML = currentLines.toString();
+	
+	var requestAnimFrame = window.requestAnimationFrame || window.mozRequestAnimationFrame ||
+							window.webkitRequestAnimationFrame || window.msRequestAnimationFrame;
+							
+	window.requestAnimationFrame = requestAnimFrame;
+	
+	requestAnimationFrame(update);
+}
+
+function update()
+{
+	curTime = new Date().getTime();
+	
+	if(curTime - prevTime > 500)
+	{
+		// update the game piece
+		if( checkMove(currentPiece.gridx, currentPiece.gridy + 1, currentPiece.curState) )
+		{
+			currentPiece.gridy += 1;
+		}
+		else
+		{
+			copyData(currentPiece);
+			currentPiece = getRandomPiece();
+		}
+		
+		// update time
+		prevTime = curTime;
+	}
+	
+	ctx.clearRect(0, 0, 320, 640);
+	drawBoard();
+	drawPiece(currentPiece);
+	
+	if(isGameOver == false)
+	{
+		requestAnimationFrame(update);
+	}
+	else
+		ctx.drawImage(gameOverImg, 0, 0, 320, 640, 0, 0, 320, 640);
+}
+
+function copyData(p)
+{
+	var xpos = p.gridx;
+	var ypos = p.gridy;
+	var state = p.curState;
+	
+	for(var r = 0, len = p.states[state].length; r < len; r++)
+	{
+		for(var c = 0, len2 = p.states[state][r].length; c < len2; c++)
+		{
+			if(p.states[state][r][c] == 1 && ypos >= 0)
+			{
+				gameData[ypos][xpos] = (p.color + 1);
+			}
+			
+			xpos += 1;
+		}
+		
+		xpos = p.gridx;
+		ypos += 1;
+	}
+	
+	checkLines();
+	
+	if(p.gridy < 0)
+	{
+		isGameOver = true;
+	}
+}
+
+function checkLines()
+{
+	var lineFound = false;
+	var fullRow = true;
+	var r = ROWS - 1;
+	var c = COLS - 1;
+	
+	while(r >= 0)
+	{
+		while(c >= 0)
+		{
+			if(gameData[r][c] == 0)
+			{
+				fullRow = false;
+				c = -1;
+			}
+			c--;
+		}
+		
+		if(fullRow == true)
+		{
+			zeroRow(r);
+			r++;
+			lineFound = true;
+			currentLines++;
+		}
+		
+		fullRow = true;
+		c = COLS - 1;
+		r--;
+	}
+	
+	if(lineFound)
+	{
+		lineSpan.innerHTML = currentLines.toString();
+	}
+}
+
+function zeroRow(row)
+{
+	var r = row;
+	var c = 0;
+	
+	while(r >= 0)
+	{
+		while(c < COLS)
+		{
+			if(r > 0)
+				gameData[r][c] = gameData[r-1][c];
+			else
+				gameData[r][c] = 0;
+				
+			c++;
+		}
+		
+		c = 0;
+		r--;
+	}
+}
+
+/*
+ * Draw the game baord 
+ */
+function drawBoard()
+{
+	ctx.drawImage(backgroundImg, 0, 0, 320, 640, 0, 0, 320, 640);
+	
+	for(var r = 0; r < ROWS; r++)
+	{
+		for(var c = 0; c < COLS; c++)
+		{
+			if(gameData[r][c] != 0)
+			{
+				ctx.drawImage(blockImg, (gameData[r][c] - 1) * SIZE, 0, SIZE, SIZE, c * SIZE, r * SIZE, SIZE, SIZE);
+			}
+		}
+	}
+}
+
+function drawPiece(p)
+{
+	var drawX = p.gridx;
+	var drawY = p.gridy;
+	var state = p.curState;
+	
+	for(var r = 0, len = p.states[state].length; r < len; r++)
+	{
+		for(var c = 0, len2 = p.states[state][r].length; c < len2; c++)
+		{
+			if(p.states[state][r][c] == 1 && drawY >= 0)
+			{
+				ctx.drawImage(blockImg, p.color * SIZE, 0, SIZE, SIZE, drawX * SIZE, drawY * SIZE, SIZE, SIZE);
+			}
+			
+			drawX += 1
+		}
+		
+		drawX = p.gridx;
+		drawY += 1;
+	}
+}
+
+function checkMove(xpos, ypos, newState)
+{
+	var result = true;
+	var newx = xpos;
+	var newy = ypos;
+	
+	for(var r = 0, len = currentPiece.states[newState].length; r < len; r++)
+	{
+		for(var c = 0, len2 = currentPiece.states[newState][r].length; c < len2; c++)
+		{
+			if(newx < 0 || newx >= COLS)
+			{
+				result = false;
+				c = len2;
+				r = len;
+			}
+			
+			if(gameData[newy] != undefined && gameData[newy][newx] != 0
+				&& currentPiece.states[newState][r] != undefined && currentPiece.states[newState][r][c] != 0)
+			{
+				result = false;
+				c = len2;
+				r = len;
+			}
+			
+			newx += 1;
+		}
+		
+		newx = xpos;
+		newy += 1;
+		
+		if(newy > ROWS)
+		{
+			r = len;
+			result = false;
+		}
+	}
+	
+	return result;
+}
+
+</script>
+
+</body>
+
+</html>
